@@ -1,0 +1,3 @@
+[submodule "book-examples"]
+	path = book-examples
+	url = git@github.com:PacktPublishing/Keycloak---Identity-and-Access-Management-for-Modern-Applications-2nd-Edition.git

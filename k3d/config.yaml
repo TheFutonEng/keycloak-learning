@@ -1,0 +1,21 @@
+apiVersion: k3d.io/v1alpha4
+kind: Simple
+metadata:
+  name: keycloak
+servers: 1
+kubeAPI:
+  hostIP: "0.0.0.0"
+  hostPort: "6444"
+ports:
+  - port: 8080:80
+    nodeFilters:
+      - loadbalancer
+  - port: 8443:443
+    nodeFilters:
+      - loadbalancer
+options:
+  k3s:
+    extraArgs:
+      - arg: --no-deploy=traefik
+        nodeFilters:
+          - server:*
