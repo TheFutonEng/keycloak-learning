@@ -1,4 +1,4 @@
-apiVersion: k3d.io/v1alpha4
+apiVersion: k3d.io/v1alpha5
 kind: Simple
 metadata:
   name: keycloak
@@ -16,6 +16,9 @@ ports:
 options:
   k3s:
     extraArgs:
-      - arg: --no-deploy=traefik
+      - arg: --disable=traefik
         nodeFilters:
           - server:*
+  runtime:
+    serversMemory: "2048m"
+    serversCPU: "2"
