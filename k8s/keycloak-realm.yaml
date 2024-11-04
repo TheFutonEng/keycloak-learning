@@ -1,0 +1,39 @@
+apiVersion: k8s.keycloak.org/v1
+kind: KeycloakRealmImport
+metadata:
+  name: demo-realm
+  namespace: keycloak
+spec:
+  realm:
+    realm: demo
+    enabled: true
+    displayName: Demo Realm
+    sslRequired: "external"
+    registrationAllowed: false
+    clients:
+      - clientId: nginx-app
+        enabled: true
+        protocol: openid-connect
+        standardFlowEnabled: true
+        implicitFlowEnabled: false
+        directAccessGrantsEnabled: true
+        serviceAccountsEnabled: false
+        publicClient: false
+        clientAuthenticatorType: "client-secret"
+        secret: "nginx-secret"
+        redirectUris:
+          - "http://nginx.localhost/*"
+          - "https://nginx.localhost/*"
+        webOrigins:
+          - "+"  # Allows all origins, adjust for production
+    users:
+      - username: testuser
+        enabled: true
+        emailVerified: true
+        firstName: Test
+        lastName: User
+        email: test@example.com
+        credentials:
+          - type: password
+            value: testpass
+            temporary: false

@@ -1,0 +1,24 @@
+controller:
+  kind: DaemonSet
+  service:
+    type: LoadBalancer
+    ports:
+      http: 80
+      https: 443
+  config:
+    sslRedirect: "true"  # Changed to string
+  ingressClassResource:
+    default: "true"  # Changed to string
+
+defaultBackend:
+  enabled: "true"  # Changed to string
+
+# Add some default configuration
+config:
+  enabled: "true"
+  defaults: |
+    timeout connect 10s
+    timeout client  30s
+    timeout server  30s
+    timeout http-request 10s
+    timeout http-keep-alive 10s
