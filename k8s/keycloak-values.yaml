@@ -40,7 +40,7 @@ extraEnvVars:
 
   # Hostname configuration
   - name: KC_HOSTNAME_URL
-    value: "https://keycloak.wsp.local"  # Removed :8080 as it's not needed for external URL
+    value: "https://keycloak.wsp.local"
   - name: KC_HOSTNAME_STRICT
     value: "false"
   - name: KC_HOSTNAME_STRICT_BACKCHANNEL
@@ -53,33 +53,33 @@ extraEnvVars:
     value: "postgres"
 
 startupProbe:
-  enabled: true
-  initialDelaySeconds: 30
-  periodSeconds: 10
-  timeoutSeconds: 5
-  failureThreshold: 60
-  successThreshold: 1
+ enabled: true
+ initialDelaySeconds: 30
+ periodSeconds: 10
+ timeoutSeconds: 5
+ failureThreshold: 60
+ successThreshold: 1
 
 readinessProbe:
-  enabled: true
-  initialDelaySeconds: 30
-  periodSeconds: 10
-  timeoutSeconds: 5
-  failureThreshold: 6
-  successThreshold: 1
+ enabled: true
+ initialDelaySeconds: 30
+ periodSeconds: 10
+ timeoutSeconds: 5
+ failureThreshold: 6
+ successThreshold: 1
 
 livenessProbe:
-  enabled: true
-  initialDelaySeconds: 30
-  periodSeconds: 10
-  timeoutSeconds: 5
-  failureThreshold: 6
-  successThreshold: 1
+ enabled: true
+ initialDelaySeconds: 30
+ periodSeconds: 10
+ timeoutSeconds: 5
+ failureThreshold: 6
+ successThreshold: 1
 
 resources:
-  limits:
-    memory: "1Gi"
-    cpu: "1000m"
-  requests:
-    memory: "512Mi"
-    cpu: "200m"
+ limits:
+   memory: "1Gi"
+   cpu: "1000m"
+ requests:
+   memory: "512Mi"
+   cpu: "200m"

@@ -12,8 +12,19 @@ controller:
   defaultTLSSecret:
     namespace: ingress-controller
     name: haproxy-tls
+  extraArgs:
+    - --default-ssl-certificate=ingress-controller/haproxy-tls
+    - --allow-cross-namespace=true
   ingressClassResource:
     default: "true"
+  containerPorts:
+    http: 80
+    https: 443
+    stat: 1024
+  deployment:
+    tls:
+      enabled: true
+      secretName: haproxy-tls
 
 defaultBackend:
   enabled: "true"
@@ -28,3 +39,8 @@ config:
     timeout http-keep-alive 10s
 
   ssl-options: "no-sslv3 no-tlsv10 no-tlsv11"
+
+  ssl-dh-param-file: "/etc/haproxy/certs/dhparam.pem"
+
+  frontend: |
+    bind *:443 ssl crt /etc/haproxy/certs/tls.pem alpn h2,http/1.1

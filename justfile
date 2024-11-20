@@ -308,23 +308,10 @@ get-access-info:
     kubectl get ingress -n keycloak
 
 # Setup cert-manager and configure with intermediate CA
-setup-cert-manager: create-ca-dirs organize-ca-files install-cert-manager create-ca-secret create-cluster-issuer
-
-# Create necessary directories
-create-ca-dirs:
-    #!/usr/bin/env sh
-    mkdir -p ca/certs ca/private k8s/generated
-    touch ca/certs/.gitkeep ca/private/.gitkeep k8s/generated/.gitkeep
-
-# Organize CA files with correct names and permissions
-organize-ca-files:
-    #!/usr/bin/env sh
-    cp ca/intermediate.cert.pem ca/certs/
-    cp ca/intermediate.key ca/private/intermediate.key.pem
-    chmod 600 ca/private/intermediate.key.pem
+setup-cert-manager: create-ca-secret deploy-cert-manager create-cluster-issuer
 
 # Install cert-manager using Helm
-install-cert-manager:
+deploy-cert-manager:
     #!/usr/bin/env sh
     helm repo add jetstack https://charts.jetstack.io
     helm repo update
@@ -341,8 +328,8 @@ create-ca-secret:
     #!/usr/bin/env sh
     kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -
     kubectl create secret tls intermediate-ca-key-pair \
-        --cert=ca/certs/intermediate.cert.pem \
-        --key=ca/private/intermediate.key.pem \
+        --cert=ca/intermediate.cert.pem \
+        --key=ca/intermediate.key.pem \
         --namespace=cert-manager \
         --dry-run=client -o yaml | kubectl apply -f -
 
@@ -367,18 +354,45 @@ create-test-cert:
 clean-test-cert:
     kubectl delete -f k8s/test-cert.yaml --ignore-not-found
 
-# Create all necessary certificates
+# Create namespace and certs for HAProxy
 create-certs:
     #!/usr/bin/env sh
+    echo "Creating ingress-controller namespace..."
+    kubectl create namespace ingress-controller --dry-run=client -o yaml | kubectl apply -f -
+
     echo "Creating certificate for HAProxy..."
     kubectl apply -f k8s/haproxy-cert.yaml
 
-    echo "Creating certificate for Keycloak..."
-    kubectl apply -f k8s/keycloak-cert.yaml
-
-    echo "Waiting for certificates to be ready..."
+    echo "Waiting for certificate to be ready..."
     kubectl wait --for=condition=Ready certificate -n ingress-controller haproxy-cert --timeout=60s
-    kubectl wait --for=condition=Ready certificate -n keycloak keycloak-cert --timeout=60s
+
+    echo "\nCertificate status:"
+    kubectl get certificate -n ingress-controller haproxy-cert
+
+# Verify and fix HAProxy TLS secret format
+fix-haproxy-tls:
+    #!/usr/bin/env sh
+    echo "Extracting current TLS secret..."
+    kubectl get secret -n ingress-controller haproxy-tls -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/tls.crt
+    kubectl get secret -n ingress-controller haproxy-tls -o jsonpath='{.data.tls\.key}' | base64 -d > /tmp/tls.key
+
+    echo "Creating combined PEM file..."
+    cat /tmp/tls.crt /tmp/tls.key > /tmp/tls.pem
+
+    echo "Creating new secret..."
+    kubectl create secret generic haproxy-tls \
+        --namespace ingress-controller \
+        --from-file=tls.crt=/tmp/tls.crt \
+        --from-file=tls.key=/tmp/tls.key \
+        --from-file=tls.pem=/tmp/tls.pem \
+        -o yaml --dry-run=client | kubectl apply -f -
+
+    echo "Cleaning up..."
+    rm -f /tmp/tls.crt /tmp/tls.key /tmp/tls.pem
+
+    echo "Restarting HAProxy pods..."
+    kubectl rollout restart deployment -n ingress-controller haproxy-ingress-kubernetes-ingress 2>/dev/null || true
+    kubectl rollout restart daemonset -n ingress-controller haproxy-ingress-kubernetes-ingress 2>/dev/null || true
 
 # Reset everything and create a fresh cluster with all components
 reset-all:
