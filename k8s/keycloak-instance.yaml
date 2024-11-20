@@ -1,85 +1,90 @@
-apiVersion: k8s.keycloak.org/v1
+apiVersion: k8s.keycloak.org/v2alpha1
 kind: Keycloak
 metadata:
   name: keycloak
   namespace: keycloak
 spec:
   instances: 1
-  image: quay.io/keycloak/keycloak:21.1.1
+  image: quay.io/keycloak/keycloak:26.0.5
   db:
     vendor: postgres
     host: keycloak-postgresql
     port: 5432
     database: keycloak
-    username: keycloak
+    usernameSecret:
+      name: keycloak-db-secret
+      key: username
     passwordSecret:
       name: keycloak-db-secret
+      key: password
   http:
     httpEnabled: true
-    tlsSecret: keycloak-tls-secret
+    httpPort: 8080
   hostname:
-    hostname: keycloak.localhost
-  ingress:
-    enabled: false  # We're managing ingress separately
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: keycloak-db-secret
-  namespace: keycloak
-type: Opaque
-stringData:
-  password: keycloak123
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: keycloak-postgresql
-  namespace: keycloak
-spec:
-  ports:
-    - port: 5432
-      targetPort: 5432
-  selector:
-    app: postgresql
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: keycloak-postgresql
-  namespace: keycloak
-spec:
-  serviceName: keycloak-postgresql
-  replicas: 1
-  selector:
-    matchLabels:
-      app: postgresql
-  template:
-    metadata:
-      labels:
-        app: postgresql
-    spec:
-      containers:
-        - name: postgresql
-          image: postgres:14-alpine
-          env:
-            - name: POSTGRES_DB
-              value: keycloak
-            - name: POSTGRES_USER
-              value: keycloak
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-db-secret
-                  key: password
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/postgresql/data
-  volumeClaimTemplates:
-    - metadata:
-        name: data
+    hostname: keycloak.wsp.local
+  unsupported:
+    podTemplate:
       spec:
-        accessModes: [ "ReadWriteOnce" ]
-        resources:
-          requests:
-            storage: 1Gi
+        containers:
+          - name: keycloak
+            resources:
+              requests:
+                memory: "512Mi"
+                cpu: "200m"
+              limits:
+                memory: "1Gi"
+                cpu: "1000m"
+            startupProbe:
+              httpGet:
+                path: /health/live
+                port: 8080
+              initialDelaySeconds: 60
+              periodSeconds: 5
+              failureThreshold: 60
+            livenessProbe:
+              httpGet:
+                path: /health/live
+                port: 8080
+              initialDelaySeconds: 60
+              periodSeconds: 30
+            readinessProbe:
+              httpGet:
+                path: /health/ready
+                port: 8080
+              initialDelaySeconds: 60
+              periodSeconds: 30
+            env:
+              - name: KEYCLOAK_ADMIN
+                value: "admin"
+              - name: KEYCLOAK_ADMIN_PASSWORD
+                value: "admin123"
+              - name: KC_CACHE
+                value: "local"
+              - name: KC_DB
+                value: "postgres"
+              - name: KC_DB_URL_HOST
+                value: "keycloak-postgresql"
+              - name: KC_DB_URL_PORT
+                value: "5432"
+              - name: KC_DB_URL_DATABASE
+                value: "keycloak"
+              - name: KC_DB_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: keycloak-db-secret
+                    key: username
+              - name: KC_DB_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: keycloak-db-secret
+                    key: password
+              - name: KC_HOSTNAME
+                value: "keycloak.wsp.local"
+              - name: KC_PROXY
+                value: "edge"
+              - name: JAVA_OPTS_APPEND
+                value: "-Xms512m -Xmx1024m -Djava.net.preferIPv4Stack=true"
+            command:
+              - "/opt/keycloak/bin/kc.sh"
+            args:
+              - "start"

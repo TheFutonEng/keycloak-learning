@@ -1,39 +1,114 @@
-apiVersion: k8s.keycloak.org/v1
-kind: KeycloakRealmImport
+# k8s/keycloak-realm.yaml
+apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: demo-realm
+  name: keycloak-realm-config
   namespace: keycloak
-spec:
-  realm:
-    realm: demo
-    enabled: true
-    displayName: Demo Realm
-    sslRequired: "external"
-    registrationAllowed: false
-    clients:
-      - clientId: nginx-app
-        enabled: true
-        protocol: openid-connect
-        standardFlowEnabled: true
-        implicitFlowEnabled: false
-        directAccessGrantsEnabled: true
-        serviceAccountsEnabled: false
-        publicClient: false
-        clientAuthenticatorType: "client-secret"
-        secret: "nginx-secret"
-        redirectUris:
-          - "http://nginx.localhost/*"
-          - "https://nginx.localhost/*"
-        webOrigins:
-          - "+"  # Allows all origins, adjust for production
-    users:
-      - username: testuser
-        enabled: true
-        emailVerified: true
-        firstName: Test
-        lastName: User
-        email: test@example.com
-        credentials:
-          - type: password
-            value: testpass
-            temporary: false
+data:
+  realm.json: |
+    {
+      "realm": "demo",
+      "enabled": true,
+      "displayName": "Demo Realm",
+      "displayNameHtml": "<div class=\"kc-logo-text\">Demo Realm</div>",
+      "revokeRefreshToken": true,
+      "refreshTokenMaxReuse": 0,
+      "accessTokenLifespan": 300,
+      "accessTokenLifespanForImplicitFlow": 900,
+      "ssoSessionIdleTimeout": 1800,
+      "ssoSessionMaxLifespan": 36000,
+      "sslRequired": "external",
+      "registrationAllowed": false,
+      "editUsernameAllowed": false,
+      "resetPasswordAllowed": true,
+      "bruteForceProtected": true,
+      "permanentLockout": false,
+      "maxFailureWaitSeconds": 900,
+      "minimumQuickLoginWaitSeconds": 60,
+      "waitIncrementSeconds": 60,
+      "quickLoginCheckMilliSeconds": 1000,
+      "maxDeltaTimeSeconds": 43200,
+      "failureFactor": 30,
+      "defaultRoles": ["default-role"],
+      "roles": {
+        "realm": [
+          {
+            "name": "user",
+            "description": "Regular user role"
+          },
+          {
+            "name": "admin",
+            "description": "Administrator role"
+          }
+        ]
+      },
+      "groups": [
+        {
+          "name": "regular-users",
+          "path": "/regular-users",
+          "attributes": {},
+          "realmRoles": ["user"],
+          "subGroups": []
+        },
+        {
+          "name": "administrators",
+          "path": "/administrators",
+          "attributes": {},
+          "realmRoles": ["admin"],
+          "subGroups": []
+        }
+      ],
+      "clients": [
+        {
+          "clientId": "demo-app",
+          "enabled": true,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "demo-app-secret",
+          "redirectUris": ["http://localhost:3000/*"],
+          "webOrigins": ["http://localhost:3000"],
+          "publicClient": false,
+          "protocol": "openid-connect",
+          "bearerOnly": false,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": true,
+          "serviceAccountsEnabled": false,
+          "authorizationServicesEnabled": false,
+          "fullScopeAllowed": true
+        }
+      ],
+      "users": [
+        {
+          "username": "testuser",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Test",
+          "lastName": "User",
+          "email": "testuser@example.com",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "testuser123",
+              "temporary": false
+            }
+          ],
+          "groups": ["regular-users"]
+        },
+        {
+          "username": "admin-user",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Admin",
+          "lastName": "User",
+          "email": "admin@example.com",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "admin123",
+              "temporary": false
+            }
+          ],
+          "groups": ["administrators"]
+        }
+      ]
+    }

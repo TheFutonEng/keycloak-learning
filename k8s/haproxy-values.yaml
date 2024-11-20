@@ -1,3 +1,4 @@
+# k8s/haproxy-values.yaml
 controller:
   kind: DaemonSet
   service:
@@ -6,14 +7,17 @@ controller:
       http: 80
       https: 443
   config:
-    sslRedirect: "true"  # Changed to string
+    ssl-redirect: "true"
+    ssl-redirect-code: "301"
+  defaultTLSSecret:
+    namespace: ingress-controller
+    name: haproxy-tls
   ingressClassResource:
-    default: "true"  # Changed to string
+    default: "true"
 
 defaultBackend:
-  enabled: "true"  # Changed to string
+  enabled: "true"
 
-# Add some default configuration
 config:
   enabled: "true"
   defaults: |
@@ -22,3 +26,5 @@ config:
     timeout server  30s
     timeout http-request 10s
     timeout http-keep-alive 10s
+
+  ssl-options: "no-sslv3 no-tlsv10 no-tlsv11"

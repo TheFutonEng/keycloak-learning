@@ -128,3 +128,19 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# .gitignore additions
+# CA private keys and secrets
+ca/*.key.pem
+ca/*.key
+ca/private/
+k8s/secrets/*.yaml
+!k8s/secrets/.gitkeep
+
+# Generated CA secrets
+k8s/generated/*.yaml
+!k8s/generated/.gitkeep
+
+# Keep CA certificate files (public)
+!ca/*.cert.pem
+!ca/certs/

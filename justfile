@@ -141,86 +141,100 @@ delete-ingress:
     helm uninstall haproxy-ingress -n ingress-controller || true
     kubectl delete namespace ingress-controller || true
 
-# Deploy Keycloak Operator and Instance
+# Deploy Keycloak using Helm
 deploy-keycloak:
     #!/usr/bin/env sh
     echo "Creating keycloak namespace..."
     kubectl create namespace keycloak --dry-run=client -o yaml | kubectl apply -f -
 
-    echo "Deploying Keycloak Operator..."
-    kubectl apply -f https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/21.1.1/kubernetes/keycloaks.k8s.keycloak.org-v1.yml
-    kubectl apply -f https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/21.1.1/kubernetes/keycloakrealmimports.k8s.keycloak.org-v1.yml
-    kubectl apply -f k8s/keycloak-operator.yaml
+    echo "Adding Bitnami helm repository..."
+    helm repo add bitnami https://charts.bitnami.com/bitnami
+    helm repo update
 
-    echo "Waiting for operator to be ready..."
-    kubectl wait --namespace keycloak \
-        --for=condition=ready pod \
-        --selector=app.kubernetes.io/name=keycloak-operator \
-        --timeout=300s
-
-    echo "Deploying Keycloak instance..."
-    kubectl apply -f k8s/keycloak-instance.yaml
-
-    echo "Waiting for Keycloak to be ready..."
-    kubectl wait --namespace keycloak \
-        --for=condition=ready pod \
-        --selector=app=keycloak \
-        --timeout=300s
-
-    echo "Creating Keycloak ingress..."
-    kubectl apply -f k8s/keycloak-ingress.yaml
+    echo "Deploying Keycloak with Helm..."
+    helm upgrade --install keycloak bitnami/keycloak \
+        --namespace keycloak \
+        --values k8s/keycloak-values.yaml \
+        --wait \
+        --timeout 10m
 
     echo "Keycloak deployment status:"
     kubectl get pods,svc,ingress -n keycloak
 
-# Delete Keycloak deployment and cleanup resources
+# Delete Keycloak deployment
 delete-keycloak:
     #!/usr/bin/env sh
-    echo "Removing Keycloak components..."
+    echo "Removing Keycloak..."
+    helm uninstall keycloak -n keycloak || true
 
-    # Delete StatefulSet first to ensure proper PVC release
-    kubectl delete statefulset -n keycloak --all --timeout=30s --ignore-not-found || true
+    echo "Removing PVCs..."
+    kubectl delete pvc -n keycloak --all --timeout=30s || true
 
-    # Force delete any stuck pods
-    echo "Force cleaning any stuck pods..."
-    kubectl delete pods -n keycloak --all --force --grace-period=0 2>/dev/null || true
-
-    echo "Removing Keycloak realm..."
-    kubectl delete keycloakrealmimports.k8s.keycloak.org --all -n keycloak --timeout=30s --ignore-not-found || true
-
-    echo "Removing Keycloak instance..."
-    kubectl delete keycloak --all -n keycloak --timeout=30s --ignore-not-found || true
-
-    echo "Removing Keycloak operator..."
-    kubectl delete -f https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/21.1.1/kubernetes/keycloaks.k8s.keycloak.org-v1.yml --ignore-not-found || true
-    kubectl delete -f https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/21.1.1/kubernetes/keycloakrealmimports.k8s.keycloak.org-v1.yml --ignore-not-found || true
-    kubectl delete -f k8s/keycloak-operator.yaml --ignore-not-found || true
-
-    # Force delete PVCs after StatefulSet is gone
-    echo "Removing persistent volumes and claims..."
-    kubectl delete pvc -n keycloak --all --force --grace-period=0 2>/dev/null || true
-
-    echo "Removing ingress..."
-    kubectl delete -f k8s/keycloak-ingress.yaml --ignore-not-found || true
-
-    echo "Force removing namespace (may take a few moments)..."
-    kubectl delete namespace keycloak --force --grace-period=0 || true
+    echo "Removing namespace..."
+    kubectl delete namespace keycloak --timeout=30s || true
 
     echo "Cleanup complete."
 
-# Deploy Keycloak realm and initial configuration
-deploy-realm: check-keycloak
+# Apply the initial realm configuration
+setup-realm:
     #!/usr/bin/env sh
-    echo "Deploying Keycloak realm configuration..."
+    echo "Creating Keycloak realm configuration..."
     kubectl apply -f k8s/keycloak-realm.yaml
 
-    echo "Waiting for realm to be ready..."
-    kubectl wait --namespace keycloak \
-        --for=condition=ready keycloakrealmimports/demo-realm \
-        --timeout=300s
+    echo "Waiting for Keycloak to be ready..."
+    kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=keycloak -n keycloak --timeout=300s
 
-    echo "Realm status:"
-    kubectl get keycloakrealmimports -n keycloak
+    echo "Importing realm configuration..."
+    POD_NAME=$(kubectl get pod -l app.kubernetes.io/instance=keycloak -n keycloak -o jsonpath='{.items[0].metadata.name}')
+    kubectl cp k8s/keycloak-realm.yaml keycloak/$POD_NAME:/tmp/realm.yaml
+
+    # Import the realm using kcadm.sh
+    kubectl exec -n keycloak $POD_NAME -- bash -c '\
+        export KEYCLOAK_ADMIN=admin && \
+        export KEYCLOAK_ADMIN_PASSWORD=admin123 && \
+        /opt/bitnami/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user $KEYCLOAK_ADMIN --password $KEYCLOAK_ADMIN_PASSWORD && \
+        /opt/bitnami/keycloak/bin/kcadm.sh create realms -f /tmp/realm.yaml'
+
+
+# Get Keycloak status and realm info
+get-realm-info:
+    #!/usr/bin/env sh
+    POD_NAME=$(kubectl get pod -l app.kubernetes.io/instance=keycloak -n keycloak -o jsonpath='{.items[0].metadata.name}')
+    echo "Realm List:"
+    kubectl exec -n keycloak $POD_NAME -- bash -c '\
+        export KEYCLOAK_ADMIN=admin && \
+        export KEYCLOAK_ADMIN_PASSWORD=admin123 && \
+        /opt/bitnami/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user $KEYCLOAK_ADMIN --password $KEYCLOAK_ADMIN_PASSWORD && \
+        /opt/bitnami/keycloak/bin/kcadm.sh get realms'
+
+# Reset admin password
+reset-admin-password PASSWORD:
+    #!/usr/bin/env sh
+    POD_NAME=$(kubectl get pod -l app.kubernetes.io/instance=keycloak -n keycloak -o jsonpath='{.items[0].metadata.name}')
+    kubectl exec -n keycloak $POD_NAME -- bash -c '\
+        export KEYCLOAK_ADMIN=admin && \
+        export KEYCLOAK_ADMIN_PASSWORD={{PASSWORD}} && \
+        /opt/bitnami/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080/auth --realm master --user $KEYCLOAK_ADMIN --password $KEYCLOAK_ADMIN_PASSWORD && \
+        /opt/bitnami/keycloak/bin/kcadm.sh update users/ADMIN_USER_ID -r master -s "credentials[0].value={{PASSWORD}}"'
+
+# Get Keycloak URL and status
+get-keycloak-url:
+    #!/usr/bin/env sh
+    echo "Keycloak URLs:"
+    echo "Main URL: http://keycloak.wsp.local:8080"
+    echo "Admin Console: http://keycloak.wsp.local:8080/admin"
+    echo "\nIngress Status:"
+    kubectl get ingress -n keycloak
+    echo "\nEndpoint Status:"
+    kubectl get endpoints -n keycloak
+
+# Verify DNS resolution
+check-dns:
+    #!/usr/bin/env sh
+    echo "Testing DNS resolution for keycloak.wsp.local..."
+    getent hosts keycloak.wsp.local || echo "DNS entry not found"
+    echo "\nTesting connection to Keycloak..."
+    curl -I http://keycloak.wsp.local:8080 || echo "Connection failed"
 
 # Ensure Keycloak is running before deploying realm
 check-keycloak:
@@ -234,16 +248,160 @@ check-keycloak:
         exit 1
     fi
 
-# Get Keycloak realm status
-get-realm-status:
-    #!/usr/bin/env sh
-    echo "Realm Import Status:"
-    kubectl get keycloakrealmimports -n keycloak
-    echo "\nRealm Events:"
-    kubectl describe keycloakrealmimport demo-realm -n keycloak
-
 # Delete Keycloak realm
 delete-realm:
     #!/usr/bin/env sh
     echo "Deleting Keycloak realm..."
     kubectl delete -f k8s/keycloak-realm.yaml --ignore-not-found
+
+# Get detailed Keycloak status
+debug-keycloak:
+    #!/usr/bin/env sh
+    echo "\nAll pods with labels:"
+    kubectl get pods --show-labels -n keycloak
+
+    echo "\nKeycloak events:"
+    kubectl get events -n keycloak --sort-by='.lastTimestamp'
+
+    echo "\nKeycloak container logs:"
+    kubectl logs -n keycloak keycloak-0 || true
+
+# Test HTTP connectivity
+test-http:
+    #!/usr/bin/env sh
+    echo "Testing Keycloak HTTP endpoints..."
+
+    echo "\nTesting main endpoint:"
+    curl -v http://keycloak.wsp.local:8080/
+
+    echo "\nTesting admin console:"
+    curl -v http://keycloak.wsp.local:8080/admin
+
+    echo "\nTesting health endpoint:"
+    curl -v http://keycloak.wsp.local:8080/health/ready
+
+# Debug HTTP setup
+debug-http:
+    #!/usr/bin/env sh
+    echo "Checking Keycloak pod status..."
+    kubectl get pods -n keycloak
+
+    echo "\nKeycloak environment variables:"
+    kubectl exec -n keycloak deployment/keycloak -- env | grep -i 'kc_\|keycloak'
+
+    echo "\nHAProxy ingress configuration:"
+    kubectl get ingress -n keycloak -o yaml
+
+    echo "\nKeycloak logs:"
+    kubectl logs -n keycloak -l app.kubernetes.io/name=keycloak --tail=50
+
+# Get Keycloak access information
+get-access-info:
+    #!/usr/bin/env sh
+    echo "Keycloak Access Information:"
+    echo "Main URL: http://keycloak.wsp.local:8080"
+    echo "Admin Console: http://keycloak.wsp.local:8080/admin"
+    echo "Default admin credentials:"
+    echo "  Username: admin"
+    echo "  Password: admin123"
+    echo "\nIngress Status:"
+    kubectl get ingress -n keycloak
+
+# Setup cert-manager and configure with intermediate CA
+setup-cert-manager: create-ca-dirs organize-ca-files install-cert-manager create-ca-secret create-cluster-issuer
+
+# Create necessary directories
+create-ca-dirs:
+    #!/usr/bin/env sh
+    mkdir -p ca/certs ca/private k8s/generated
+    touch ca/certs/.gitkeep ca/private/.gitkeep k8s/generated/.gitkeep
+
+# Organize CA files with correct names and permissions
+organize-ca-files:
+    #!/usr/bin/env sh
+    cp ca/intermediate.cert.pem ca/certs/
+    cp ca/intermediate.key ca/private/intermediate.key.pem
+    chmod 600 ca/private/intermediate.key.pem
+
+# Install cert-manager using Helm
+install-cert-manager:
+    #!/usr/bin/env sh
+    helm repo add jetstack https://charts.jetstack.io
+    helm repo update
+    helm upgrade --install \
+        cert-manager jetstack/cert-manager \
+        --namespace cert-manager \
+        --create-namespace \
+        --set installCRDs=true \
+        --wait
+    kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=cert-manager -n cert-manager --timeout=60s
+
+# Create the CA secret for cert-manager
+create-ca-secret:
+    #!/usr/bin/env sh
+    kubectl create namespace cert-manager --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create secret tls intermediate-ca-key-pair \
+        --cert=ca/certs/intermediate.cert.pem \
+        --key=ca/private/intermediate.key.pem \
+        --namespace=cert-manager \
+        --dry-run=client -o yaml | kubectl apply -f -
+
+# Create the ClusterIssuer
+create-cluster-issuer:
+    kubectl apply -f k8s/cluster-issuer.yaml
+
+# Verify cert-manager setup
+verify-cert-manager:
+    #!/usr/bin/env sh
+    kubectl get pods -n cert-manager
+    kubectl get secret intermediate-ca-key-pair -n cert-manager
+    kubectl get clusterissuer wsp-intermediate-ca -o wide
+    kubectl logs -l app.kubernetes.io/instance=cert-manager -n cert-manager --tail=20
+
+# Create test certificate
+create-test-cert:
+    kubectl apply -f k8s/test-cert.yaml
+    kubectl wait --for=condition=Ready certificate test-cert --timeout=60s
+
+# Clean up test certificate
+clean-test-cert:
+    kubectl delete -f k8s/test-cert.yaml --ignore-not-found
+
+# Create all necessary certificates
+create-certs:
+    #!/usr/bin/env sh
+    echo "Creating certificate for HAProxy..."
+    kubectl apply -f k8s/haproxy-cert.yaml
+
+    echo "Creating certificate for Keycloak..."
+    kubectl apply -f k8s/keycloak-cert.yaml
+
+    echo "Waiting for certificates to be ready..."
+    kubectl wait --for=condition=Ready certificate -n ingress-controller haproxy-cert --timeout=60s
+    kubectl wait --for=condition=Ready certificate -n keycloak keycloak-cert --timeout=60s
+
+# Reset everything and create a fresh cluster with all components
+reset-all:
+    #!/usr/bin/env sh
+    echo "Deleting existing cluster..."
+    just delete-cluster
+
+    echo "Creating fresh cluster..."
+    just create-cluster
+
+    echo "Setting up cert-manager..."
+    just setup-cert-manager
+
+    echo "Creating TLS certificates..."
+    just create-certs
+
+    echo "Deploying HAProxy ingress with TLS..."
+    just deploy-ingress
+
+    echo "Deploying Keycloak..."
+    just deploy-keycloak
+
+    echo "Waiting for all pods to be ready..."
+    kubectl wait --for=condition=ready pod --all -n cert-manager --timeout=300s
+    kubectl wait --for=condition=ready pod --all -n ingress-controller --timeout=300s
+    kubectl wait --for=condition=ready pod --all -n keycloak --timeout=300s

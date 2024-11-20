@@ -1,0 +1,85 @@
+# k8s/keycloak-values.yaml
+auth:
+  adminUser: admin
+  adminPassword: admin123
+
+ingress:
+  enabled: true
+  hostname: keycloak.wsp.local
+  ingressClassName: haproxy
+  pathType: Prefix
+  path: /
+  annotations:
+    haproxy.org/ssl-redirect: "false"
+
+service:
+  type: ClusterIP
+  ports:
+    http: 8080
+
+postgresql:
+  enabled: true
+  auth:
+    username: keycloak
+    password: keycloak123
+    database: keycloak
+  architecture: standalone
+
+extraEnvVars:
+  # HTTP/HTTPS configuration
+  - name: KC_HTTP_ENABLED
+    value: "true"
+  - name: KC_HTTPS_ENABLED
+    value: "false"
+
+  # Proxy settings
+  - name: KC_PROXY
+    value: "edge"
+  - name: KC_PROXY_ADDRESS_FORWARDING
+    value: "true"
+
+  # Hostname configuration
+  - name: KC_HOSTNAME_URL
+    value: "https://keycloak.wsp.local"  # Removed :8080 as it's not needed for external URL
+  - name: KC_HOSTNAME_STRICT
+    value: "false"
+  - name: KC_HOSTNAME_STRICT_BACKCHANNEL
+    value: "false"
+
+  # Development settings
+  - name: KC_LOG_LEVEL
+    value: "INFO"
+  - name: KC_DB
+    value: "postgres"
+
+startupProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 60
+  successThreshold: 1
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+  successThreshold: 1
+
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+  successThreshold: 1
+
+resources:
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+  requests:
+    memory: "512Mi"
+    cpu: "200m"

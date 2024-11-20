@@ -20,5 +20,5 @@ options:
         nodeFilters:
           - server:*
   runtime:
-    serversMemory: "2048m"
+    serversMemory: "4096m"
     serversCPU: "2"

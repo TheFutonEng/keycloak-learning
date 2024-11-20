@@ -18,7 +18,7 @@ spec:
       serviceAccountName: keycloak-operator
       containers:
         - name: operator
-          image: quay.io/keycloak/keycloak-operator:21.1.1
+          image: quay.io/keycloak/keycloak-operator:26.0.5
           args: ["start", "--namespace", "keycloak"]
           resources:
             limits:
@@ -28,6 +28,7 @@ spec:
               cpu: "100m"
               memory: "256Mi"
 ---
+# Rest of the RBAC config remains the same
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -54,19 +55,4 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get"]
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
-    verbs: ["*"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: keycloak-operator
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: keycloak-operator
-subjects:
-  - kind: ServiceAccount
-    name: keycloak-operator
-    namespace: keycloak
+  - apiGroups: ["networking.k8
