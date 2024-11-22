@@ -139,7 +139,7 @@ delete-ingress:
     #!/usr/bin/env sh
     echo "Removing HAProxy ingress controller..."
     helm uninstall haproxy-ingress -n ingress-controller || true
-    kubectl delete namespace ingress-controller || true
+    # kubectl delete namespace ingress-controller || true
 
 # Deploy Keycloak using Helm
 deploy-keycloak:

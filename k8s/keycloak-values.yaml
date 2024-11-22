@@ -10,7 +10,8 @@ ingress:
   pathType: Prefix
   path: /
   annotations:
-    haproxy.org/ssl-redirect: "false"
+    haproxy.org/ssl-redirect: "true"
+  tls: true
 
 service:
   type: ClusterIP
@@ -32,54 +33,62 @@ extraEnvVars:
   - name: KC_HTTPS_ENABLED
     value: "false"
 
-  # Proxy settings
+  # Proxy settings for TLS termination at HAProxy
   - name: KC_PROXY
     value: "edge"
   - name: KC_PROXY_ADDRESS_FORWARDING
     value: "true"
 
-  # Hostname configuration
+  # Hostname configuration - note port 8443 for external access
   - name: KC_HOSTNAME_URL
-    value: "https://keycloak.wsp.local"
+    value: "https://keycloak.wsp.local:8443"
+  - name: KC_HOSTNAME_ADMIN_URL
+    value: "https://keycloak.wsp.local:8443"
   - name: KC_HOSTNAME_STRICT
     value: "false"
   - name: KC_HOSTNAME_STRICT_BACKCHANNEL
     value: "false"
 
+  # Force Keycloak to use the forwarded port in URLs
+  - name: KC_HOSTNAME_PORT
+    value: "8443"
+  - name: KC_HOSTNAME_STRICT_HTTPS
+    value: "true"
+
   # Development settings
   - name: KC_LOG_LEVEL
-    value: "INFO"
+    value: "DEBUG"
   - name: KC_DB
     value: "postgres"
 
 startupProbe:
- enabled: true
- initialDelaySeconds: 30
- periodSeconds: 10
- timeoutSeconds: 5
- failureThreshold: 60
- successThreshold: 1
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 60
+  successThreshold: 1
 
 readinessProbe:
- enabled: true
- initialDelaySeconds: 30
- periodSeconds: 10
- timeoutSeconds: 5
- failureThreshold: 6
- successThreshold: 1
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+  successThreshold: 1
 
 livenessProbe:
- enabled: true
- initialDelaySeconds: 30
- periodSeconds: 10
- timeoutSeconds: 5
- failureThreshold: 6
- successThreshold: 1
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+  successThreshold: 1
 
 resources:
- limits:
-   memory: "1Gi"
-   cpu: "1000m"
- requests:
-   memory: "512Mi"
-   cpu: "200m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+  requests:
+    memory: "512Mi"
+    cpu: "200m"

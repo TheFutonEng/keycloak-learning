@@ -1,4 +1,3 @@
-# k8s/haproxy-values.yaml
 controller:
   kind: DaemonSet
   service:
@@ -21,10 +20,6 @@ controller:
     http: 80
     https: 443
     stat: 1024
-  deployment:
-    tls:
-      enabled: true
-      secretName: haproxy-tls
 
 defaultBackend:
   enabled: "true"
@@ -40,7 +35,9 @@ config:
 
   ssl-options: "no-sslv3 no-tlsv10 no-tlsv11"
 
-  ssl-dh-param-file: "/etc/haproxy/certs/dhparam.pem"
-
   frontend: |
     bind *:443 ssl crt /etc/haproxy/certs/tls.pem alpn h2,http/1.1
+    http-request add-header X-Forwarded-Proto https if { ssl_fc }
+    http-request add-header X-Forwarded-Port 8443 if { ssl_fc }
+    http-request set-header X-Forwarded-Host %[req.hdr(Host)]
+    http-request set-header X-Original-Host %[req.hdr(Host),regsub(:8443,)]
