@@ -3,12 +3,12 @@ default:
     @just --list
 
 # Create k3d cluster using configuration file
-create-cluster:
+deploy-cluster:
     #!/usr/bin/env sh
     echo "Creating k3d cluster..."
     just delete-cluster
     echo "Creating new cluster..."
-    k3d cluster create --config k3d/k3d-config.yaml --verbose
+    k3d cluster create --config k3d/k3d-config.yaml
 
 # Export kubeconfig with correct IP for remote access
 export-kubeconfig:
@@ -175,37 +175,64 @@ delete-keycloak:
 
     echo "Cleanup complete."
 
-# Apply the initial realm configuration
-setup-realm:
+# Setup test realm in Keycloak using REST API
+setup-test-realm:
     #!/usr/bin/env sh
-    echo "Creating Keycloak realm configuration..."
-    kubectl apply -f k8s/keycloak-realm.yaml
+    echo "Creating test realm configuration..."
+    kubectl apply -f k8s/keycloak-test-realm.yaml
 
-    echo "Waiting for Keycloak to be ready..."
-    kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=keycloak -n keycloak --timeout=300s
+    echo "Waiting for Keycloak pod..."
+    kubectl wait --namespace keycloak-test \
+        --for=condition=ready pod \
+        --selector=app.kubernetes.io/instance=keycloak-test \
+        --timeout=300s
+
+    echo "Getting access token..."
+    TOKEN=$(kubectl exec -n keycloak-test keycloak-test-0 -- curl -s -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "username=admin" \
+        -d "password=admin123" \
+        -d "grant_type=password" \
+        -d "client_id=admin-cli" | jq -r '.access_token')
 
     echo "Importing realm configuration..."
-    POD_NAME=$(kubectl get pod -l app.kubernetes.io/instance=keycloak -n keycloak -o jsonpath='{.items[0].metadata.name}')
-    kubectl cp k8s/keycloak-realm.yaml keycloak/$POD_NAME:/tmp/realm.yaml
+    kubectl get configmap test-realm -n keycloak-test -o jsonpath='{.data.realm\.json}' | kubectl exec -i -n keycloak-test keycloak-test-0 -- sh -c 'cat > /tmp/realm.json'
 
-    # Import the realm using kcadm.sh
-    kubectl exec -n keycloak $POD_NAME -- bash -c '\
-        export KEYCLOAK_ADMIN=admin && \
-        export KEYCLOAK_ADMIN_PASSWORD=admin123 && \
-        /opt/bitnami/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user $KEYCLOAK_ADMIN --password $KEYCLOAK_ADMIN_PASSWORD && \
-        /opt/bitnami/keycloak/bin/kcadm.sh create realms -f /tmp/realm.yaml'
+    echo "Creating realm via API..."
+    kubectl exec -n keycloak-test keycloak-test-0 -- curl -s -X POST http://localhost:8080/admin/realms \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d @/tmp/realm.json
 
-
-# Get Keycloak status and realm info
-get-realm-info:
+# Verify realm setup using REST API
+verify-test-realm:
     #!/usr/bin/env sh
-    POD_NAME=$(kubectl get pod -l app.kubernetes.io/instance=keycloak -n keycloak -o jsonpath='{.items[0].metadata.name}')
-    echo "Realm List:"
-    kubectl exec -n keycloak $POD_NAME -- bash -c '\
-        export KEYCLOAK_ADMIN=admin && \
-        export KEYCLOAK_ADMIN_PASSWORD=admin123 && \
-        /opt/bitnami/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user $KEYCLOAK_ADMIN --password $KEYCLOAK_ADMIN_PASSWORD && \
-        /opt/bitnami/keycloak/bin/kcadm.sh get realms'
+    echo "Getting access token..."
+    TOKEN=$(kubectl exec -n keycloak-test keycloak-test-0 -- curl -s -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "username=admin" \
+        -d "password=admin123" \
+        -d "grant_type=password" \
+        -d "client_id=admin-cli" | jq -r '.access_token')
+
+    echo "\nRealm List:"
+    kubectl exec -n keycloak-test keycloak-test-0 -- curl -s http://localhost:8080/admin/realms \
+        -H "Authorization: Bearer $TOKEN" | jq '.[].realm'
+
+# Delete test realm if needed
+delete-test-realm:
+    #!/usr/bin/env sh
+    echo "Getting access token..."
+    TOKEN=$(kubectl exec -n keycloak-test keycloak-test-0 -- curl -s -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "username=admin" \
+        -d "password=admin123" \
+        -d "grant_type=password" \
+        -d "client_id=admin-cli" | jq -r '.access_token')
+
+    echo "Deleting test realm..."
+    kubectl exec -n keycloak-test keycloak-test-0 -- curl -s -X DELETE http://localhost:8080/admin/realms/test \
+        -H "Authorization: Bearer $TOKEN"
 
 # Reset admin password
 reset-admin-password PASSWORD:
@@ -247,12 +274,6 @@ check-keycloak:
         echo "Keycloak pods are not ready. Please ensure Keycloak is running."
         exit 1
     fi
-
-# Delete Keycloak realm
-delete-realm:
-    #!/usr/bin/env sh
-    echo "Deleting Keycloak realm..."
-    kubectl delete -f k8s/keycloak-realm.yaml --ignore-not-found
 
 # Get detailed Keycloak status
 debug-keycloak:
@@ -419,3 +440,90 @@ reset-all:
     kubectl wait --for=condition=ready pod --all -n cert-manager --timeout=300s
     kubectl wait --for=condition=ready pod --all -n ingress-controller --timeout=300s
     kubectl wait --for=condition=ready pod --all -n keycloak --timeout=300s
+
+
+# Deploy minimal Keycloak for testing
+deploy-minimal-keycloak:
+    #!/usr/bin/env sh
+    echo "Creating keycloak namespace..."
+    kubectl create namespace keycloak-test --dry-run=client -o yaml | kubectl apply -f -
+
+    echo "Adding Bitnami helm repository..."
+    helm repo add bitnami https://charts.bitnami.com/bitnami
+    helm repo update
+
+    echo "Deploying minimal Keycloak..."
+    helm upgrade --install keycloak-test bitnami/keycloak \
+        --namespace keycloak-test \
+        --values k8s/keycloak-minimal.yaml \
+        --wait \
+        --timeout 5m
+
+    echo "Waiting for Keycloak to be ready..."
+    kubectl wait --namespace keycloak-test \
+        --for=condition=ready pod \
+        --selector=app.kubernetes.io/instance=keycloak-test \
+        --timeout=300s
+
+    echo "Keycloak service details:"
+    kubectl get svc -n keycloak-test
+
+# Deploy test Nginx instance
+deploy-test-nginx:
+    #!/usr/bin/env sh
+    echo "Creating nginx namespace..."
+    kubectl create namespace nginx-test --dry-run=client -o yaml | kubectl apply -f -
+
+    echo "Deploying test Nginx..."
+    kubectl apply -f k8s/nginx-test.yaml
+
+    echo "Waiting for Nginx to be ready..."
+    kubectl wait --namespace nginx-test \
+        --for=condition=ready pod \
+        --selector=app=nginx-test \
+        --timeout=300s
+
+    echo "Nginx service details:"
+    kubectl get svc -n nginx-test
+
+# Clean up test environment
+delete-minimal-keycloak:
+    #!/usr/bin/env sh
+    echo "Removing keycloak-test namespaces..."
+    kubectl delete namespace keycloak-test --ignore-not-found
+
+# Clean up test environment
+delete-test-nginx:
+    #!/usr/bin/env sh
+    echo "Removing nginx-test namespaces..."
+    kubectl delete namespace nginx-test --ignore-not-found
+
+# Get test environment status
+test-env-status:
+    #!/usr/bin/env sh
+    echo "Keycloak Test Environment Status:"
+    kubectl get pods,svc -n keycloak-test
+    echo "\nNginx Test Environment Status:"
+    kubectl get pods,svc -n nginx-test
+    echo "\nEndpoints:"
+    kubectl get endpoints -n keycloak-test
+    kubectl get endpoints -n nginx-test
+
+# Port forward for local testing
+forward-test-ports:
+    #!/usr/bin/env sh
+    echo "Port forwarding Keycloak to localhost:9091..."
+    kubectl port-forward -n keycloak-test svc/keycloak-test 9091:8080 &
+    echo "Port forwarding Nginx to localhost:9091..."
+    kubectl port-forward -n nginx-test svc/nginx-test 9092:80 &
+    echo "Test Environment URLs:"
+    echo "Keycloak Admin: http://localhost:9091/admin"
+    echo "Test Nginx: http://localhost:9092"
+    echo "\nUse Ctrl+C to stop port forwarding"
+    wait
+
+# Stop any existing port forwards (helper function)
+stop-forwards:
+    #!/usr/bin/env sh
+    echo "Stopping any existing port forwards..."
+    pkill -f "kubectl port-forward.*test"

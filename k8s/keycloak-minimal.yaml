@@ -1,0 +1,35 @@
+# k8s/keycloak-minimal.yaml
+auth:
+  adminUser: admin
+  adminPassword: admin123
+
+service:
+  type: ClusterIP
+  ports:
+    http: 8080
+
+postgresql:
+  enabled: true
+  auth:
+    username: keycloak
+    password: keycloak123
+    database: keycloak
+  architecture: standalone
+
+extraEnvVars:
+  - name: KC_HTTP_ENABLED
+    value: "true"
+  - name: KC_HTTPS_ENABLED
+    value: "false"
+  - name: KC_PROXY
+    value: "edge"
+  - name: KC_LOG_LEVEL
+    value: "INFO"
+
+resources:
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+  requests:
+    memory: "512Mi"
+    cpu: "200m"
