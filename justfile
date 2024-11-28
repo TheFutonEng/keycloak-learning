@@ -10,6 +10,96 @@ deploy-cluster:
     echo "Creating new cluster..."
     k3d cluster create --config k3d/k3d-config.yaml
 
+# Create k3d cluster using configuration file
+create-cluster: delete-cluster
+    #!/usr/bin/env sh
+    echo "Creating k3d cluster..."
+    k3d cluster create --config k3d/k3d-config.yaml --verbose
+
+    # Wait for cluster to be ready
+    echo "Waiting for cluster to be ready..."
+    kubectl wait --for=condition=ready node --all --timeout=60s
+
+    # Create registry configuration in the cluster
+    echo "Configuring registry access..."
+    kubectl create configmap registry-config \
+        --from-literal=registries.yaml="mirrors: {\"k3d-registry.localhost:5111\": {\"endpoints\": [\"http://k3d-registry.localhost:5111\"]}}" \
+        -n kube-system \
+        --dry-run=client -o yaml | kubectl apply -f -
+
+    # Restart containerd to pick up registry changes (if needed)
+    echo "Restarting k3d node to apply registry configuration..."
+    docker restart k3d-keycloak-server-0
+
+# Create k3d cluster using configuration file
+create-cluster-minimal: delete-cluster
+    #!/usr/bin/env sh
+    echo "Creating k3d cluster..."
+    k3d cluster create --config k3d/k3d-config-minimal.yaml --verbose
+
+    # Wait for cluster to be ready
+    echo "Waiting for cluster to be ready..."
+    kubectl wait --for=condition=ready node --all --timeout=60s
+
+    # Create registry configuration in the cluster
+    echo "Configuring registry access..."
+    kubectl create configmap registry-config \
+        --from-literal=registries.yaml="mirrors: {\"k3d-registry.localhost:5111\": {\"endpoints\": [\"http://k3d-registry.localhost:5111\"]}}" \
+        -n kube-system \
+        --dry-run=client -o yaml | kubectl apply -f -
+
+    # Restart containerd to pick up registry changes (if needed)
+    echo "Restarting k3d node to apply registry configuration..."
+    docker restart k3d-keycloak-server-0
+
+# Define template at the top level
+inspect_template := "{{range $net, $conf := .NetworkSettings.Networks}}{{if eq $net \"k3d-keycloak\"}}{{$conf.IPAddress}}{{end}}{{end}}"
+
+
+# Configure CoreDNS and containerd for registry access
+configure-registry-dns:
+    #!/usr/bin/env sh
+    echo "Getting registry IP..."
+    REGISTRY_IP=`docker inspect k3d-registry.localhost --format '{{inspect_template}}'`
+    echo "Registry IP: $REGISTRY_IP"
+
+    echo "Updating CoreDNS configuration..."
+    kubectl get configmap -n kube-system coredns -o yaml | \
+        sed "s/NodeHosts: |.*/NodeHosts: |\n    172.19.0.3 k3d-keycloak-server-0\n    $REGISTRY_IP k3d-registry.localhost/" | \
+        kubectl apply -f -
+
+    echo "Creating containerd registry configuration..."
+    echo "mirrors:" > /tmp/registries.yaml
+    echo "  \"k3d-registry.localhost:5000\":" >> /tmp/registries.yaml
+    echo "    endpoint:" >> /tmp/registries.yaml
+    echo "      - \"http://k3d-registry.localhost:5000\"" >> /tmp/registries.yaml
+    echo "    insecure: true" >> /tmp/registries.yaml
+    echo "configs: {}" >> /tmp/registries.yaml
+
+    echo "Applying containerd configuration..."
+    docker cp /tmp/registries.yaml k3d-keycloak-server-0:/etc/rancher/k3s/registries.yaml
+    rm /tmp/registries.yaml
+
+    echo "Restarting k3d node..."
+    docker restart k3d-keycloak-server-0
+
+    echo "Waiting for node to be ready..."
+    sleep 5
+    kubectl wait --for=condition=ready node --all --timeout=60s
+
+    echo "Restarting CoreDNS..."
+    kubectl rollout restart -n kube-system deployment/coredns
+    kubectl rollout status -n kube-system deployment/coredns
+
+# Verify registry configuration
+verify-registry-dns:
+    #!/usr/bin/env sh
+    echo "Testing DNS resolution..."
+    kubectl run -it --rm debug --image=busybox -- nslookup k3d-registry.localhost || true
+
+    echo "\nChecking containerd configuration..."
+    docker exec k3d-keycloak-server-0 cat /etc/rancher/k3s/registries.yaml
+
 # Export kubeconfig with correct IP for remote access
 export-kubeconfig:
     #!/usr/bin/env sh
@@ -32,7 +122,7 @@ delete-cluster:
     fi
 
 # Create and start local registry
-create-registry:
+deploy-registry:
     #!/usr/bin/env sh
     if ! docker ps | grep -q "k3d-registry.localhost"; then
         echo "Creating local registry..."
@@ -527,3 +617,8 @@ stop-forwards:
     #!/usr/bin/env sh
     echo "Stopping any existing port forwards..."
     pkill -f "kubectl port-forward.*test"
+
+nginx-reload: delete-test-nginx build-nginx deploy-test-nginx
+
+# Build minimal keycloak test environment
+build-minimal-keycloak: create-cluster-minimal deploy-registry build-nginx configure-registry-dns deploy-minimal-keycloak deploy-test-nginx
