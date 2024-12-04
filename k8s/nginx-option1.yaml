@@ -1,0 +1,245 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-test-config
+  namespace: nginx
+data:
+  nginx.conf: |
+    daemon off;
+    worker_processes auto;
+    error_log stderr debug;
+    pid /usr/local/openresty/nginx/logs/nginx.pid;
+
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        resolver 10.43.0.10;
+        include /usr/local/openresty/nginx/conf/mime.types;
+        default_type application/octet-stream;
+
+        log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for"';
+
+        access_log /dev/stdout main;
+
+        # Temp paths
+        client_body_temp_path /tmp/openresty/client_temp;
+        proxy_temp_path       /tmp/openresty/proxy_temp;
+        fastcgi_temp_path    /tmp/openresty/fastcgi_temp;
+        uwsgi_temp_path      /tmp/openresty/uwsgi_temp;
+        scgi_temp_path       /tmp/openresty/scgi_temp;
+
+        # Lua settings
+        lua_package_path '/usr/local/openresty/lualib/?.lua;;';
+        lua_shared_dict discovery 1m;
+        lua_shared_dict jwks 1m;
+        lua_shared_dict sessions 10m;
+        lua_shared_dict session_store 1m;
+
+        init_by_lua_block {
+            require("resty.session").init({
+                key_prefix = "sessions",
+                storage = "cookie",
+                compressor = nil,
+                encoder = require("cjson").encode,
+                decoder = require("cjson").decode
+            })
+        }
+
+        server {
+            listen 8080;
+            server_name localhost;
+
+            location / {
+                root   /usr/share/nginx/html;
+                index  index.html index.htm;
+            }
+
+            location /health {
+                access_log off;
+                return 200 "healthy\n";
+            }
+
+            location = /debug {
+                access_log on;
+                default_type application/json;
+                content_by_lua_block {
+                    ngx.say(require("cjson").encode({
+                        headers = ngx.req.get_headers(),
+                        uri = ngx.var.uri,
+                        method = ngx.req.get_method()
+                    }))
+                }
+            }
+
+            location /secure {
+                access_by_lua_block {
+                    local oidc = require("resty.openidc")
+                    local opts = {
+                        redirect_uri = "http://nginx.wsp.local/_oauth",
+                        discovery = "http://keycloak.wsp.local/realms/test/.well-known/openid-configuration",
+                        client_id = "nginx-test",
+                        client_secret = "nginx-test-secret",
+                        ssl_verify = "no",
+                        session = {
+                            storage = "cookie",
+                            compressor = nil,
+                            rolling = true,
+                            lifetime = 3600
+                        }
+                    }
+
+                    local res, err = oidc.authenticate(opts)
+                    if err then
+                        ngx.status = 500
+                        ngx.log(ngx.ERR, "Error during authentication: " .. err)
+                        ngx.say("Error during authentication: " .. err)
+                        return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+                    end
+
+                    ngx.header.content_type = "application/json"
+                    ngx.say(require("cjson").encode({
+                        message = "Authentication successful",
+                        user = {
+                            username = res.id_token.preferred_username,
+                            email = res.id_token.email,
+                            name = res.id_token.name
+                        }
+                    }))
+                }
+            }
+
+            location = /_oauth {
+                access_by_lua_block {
+                    local oidc = require("resty.openidc")
+                    local opts = {
+                        redirect_uri = "http://nginx.wsp.local/_oauth",
+                        discovery = "http://keycloak.wsp.local/realms/test/.well-known/openid-configuration",
+                        client_id = "nginx-test",
+                        client_secret = "nginx-test-secret",
+                        ssl_verify = "no",
+                        session = {
+                            storage = "cookie",
+                            compressor = nil,
+                            rolling = true,
+                            lifetime = 3600
+                        }
+                    }
+
+                    local res, err = oidc.authenticate(opts)
+                    if err then
+                        ngx.log(ngx.ERR, "Error during callback: " .. err)
+                        ngx.status = 500
+                        ngx.say("Error during callback: " .. err)
+                        return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+                    end
+
+                    return ngx.redirect("/secure")
+                }
+            }
+        }
+    }
+  mime.types: |
+    types {
+        text/html                             html htm shtml;
+        text/css                              css;
+        text/xml                              xml;
+        image/gif                             gif;
+        image/jpeg                            jpeg jpg;
+        application/javascript                js;
+        application/json                      json;
+        application/xml                       rss atom;
+        image/png                             png;
+        image/svg+xml                         svg svgz;
+        image/webp                            webp;
+        image/x-icon                          ico;
+        video/mp4                             mp4;
+        application/x-font-ttf                ttf;
+        application/x-font-woff               woff;
+        application/font-woff2                woff2;
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-test
+  namespace: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-test
+  template:
+    metadata:
+      labels:
+        app: nginx-test
+    spec:
+      securityContext:
+        fsGroup: 65534  # nobody group
+        runAsUser: 65534  # nobody user
+        runAsGroup: 65534  # nobody group
+      containers:
+      - name: nginx
+        image: k3d-registry.localhost:5000/custom-nginx:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: config
+          mountPath: /usr/local/openresty/nginx/conf
+        - name: temp
+          mountPath: /tmp/openresty
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+      volumes:
+      - name: config
+        configMap:
+          name: nginx-test-config
+          defaultMode: 0644
+      - name: temp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-test
+  namespace: nginx
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+  selector:
+    app: nginx-test
+---
+# k8s/nginx-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-test
+  namespace: nginx
+  annotations:
+    haproxy.org/ssl-redirect: "false"  # Ensure no SSL redirect
+spec:
+  ingressClassName: haproxy
+  rules:
+  - host: nginx.wsp.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nginx-test
+            port:
+              number: 80

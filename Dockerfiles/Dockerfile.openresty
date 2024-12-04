@@ -1,0 +1,38 @@
+FROM openresty/openresty:1.21.4.1-1-bullseye-fat
+
+# Install additional packages
+RUN apt-get update && \
+    apt-get install -y \
+        curl \
+        luarocks \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add debug info
+RUN echo "OpenResty version:" && \
+    /usr/local/openresty/bin/openresty -v && \
+    echo "Installed modules:" && \
+    ls -l /usr/local/openresty/nginx/modules/ || echo "No modules in standard location" && \
+    ls -l /usr/local/openresty/lualib/ || echo "No lualib found"
+
+# Install lua-resty-openidc
+RUN luarocks install lua-resty-openidc
+
+# Copy nginx configuration
+COPY nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
+
+# Create directory for logs
+RUN mkdir -p /var/log/nginx && \
+    chown -R nobody:nobody /var/log/nginx
+
+# Environment variables remain the same...
+
+# Add healthcheck
+HEALTHCHECK --interval=30s --timeout=3s \
+    CMD curl -f http://localhost:$LISTEN_PORT/health || exit 1
+
+# Switch to non-root user
+USER nobody
+
+EXPOSE $LISTEN_PORT
+
+CMD ["/usr/local/openresty/bin/openresty", "-g", "daemon off;"]

@@ -1,0 +1,51 @@
+# k8s/keycloak-minimal.yaml
+auth:
+  adminUser: admin
+  adminPassword: admin123
+
+service:
+  type: ClusterIP
+  ports:
+    http: 8080
+
+postgresql:
+  enabled: true
+  auth:
+    username: keycloak
+    password: keycloak123
+    database: keycloak
+  architecture: standalone
+
+extraEnvVars:
+  - name: KC_HOSTNAME_URL
+    value: "http://localhost:8081"  # Match your port-forward
+  - name: KC_HOSTNAME_ADMIN_URL
+    value: "http://localhost:8081"  # Match your port-forward
+  - name: KC_HOSTNAME_STRICT
+    value: "false"
+  - name: KC_HTTP_ENABLED
+    value: "true"
+  - name: KC_HTTPS_ENABLED
+    value: "false"
+  - name: KC_PROXY
+    value: "edge"
+  - name: KC_LOG_LEVEL
+    value: "INFO"
+  - name: KC_HOSTNAME_STRICT_BACKCHANNEL
+    value: "false"
+  - name: KC_HOSTNAME_STRICT_HTTPS
+    value: "false"
+
+  # Logging for debugging
+  - name: KC_LOG_LEVEL
+    value: "DEBUG,io.quarkus:INFO,org.infinispan:INFO,org.keycloak.services.scheduled:INFO"
+  - name: KC_LOG_CONSOLE_COLOR
+    value: "true"
+
+resources:
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+  requests:
+    memory: "512Mi"
+    cpu: "200m"

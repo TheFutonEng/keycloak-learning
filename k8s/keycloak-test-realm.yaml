@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-realm
+  namespace: keycloak
+data:
+  realm.json: |
+    {
+      "realm": "test",
+      "enabled": true,
+      "displayName": "Test Realm",
+      "registrationAllowed": false,
+      "roles": {
+        "realm": [
+          {
+            "name": "user",
+            "description": "Regular user role"
+          }
+        ]
+      },
+      "defaultRoles": ["user"],
+      "clients": [
+        {
+          "clientId": "nginx-test",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": true,
+          "serviceAccountsEnabled": false,
+          "authorizationServicesEnabled": false,
+          "redirectUris": [
+            "http://nginx.wsp.local/*"
+          ],
+          "webOrigins": [
+            "http://nginx.wsp.local"
+          ],
+          "clientAuthenticatorType": "client-secret",
+          "secret": "nginx-test-secret"
+        }
+      ],
+      "users": [
+        {
+          "username": "testuser",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Test",
+          "lastName": "User",
+          "email": "testuser@example.com",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "testpass123",
+              "temporary": false
+            }
+          ],
+          "realmRoles": ["user"],
+          "requiredActions": []
+        }
+      ]
+    }

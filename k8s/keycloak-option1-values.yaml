@@ -1,0 +1,41 @@
+# k8s/keycloak-minimal.yaml
+auth:
+  adminUser: admin
+  adminPassword: admin123
+
+service:
+  type: ClusterIP
+  ports:
+    http: 8080
+
+ingress:
+  enabled: true
+  ingressClassName: haproxy
+  hostname: keycloak.wsp.local
+  path: /
+  pathType: Prefix
+  annotations:
+    haproxy.org/ssl-redirect: "false"
+  tls: false
+
+postgresql:
+  enabled: true
+  auth:
+    username: keycloak
+    password: keycloak123
+    database: keycloak
+  architecture: standalone
+
+extraEnvVars:
+  - name: KC_HOSTNAME
+    value: "keycloak.wsp.local"
+  - name: KC_HOSTNAME_STRICT
+    value: "false"
+  - name: KC_HTTP_ENABLED
+    value: "true"
+  - name: KC_HTTPS_ENABLED
+    value: "false"
+  - name: KC_PROXY
+    value: "edge"
+  - name: KC_LOG_LEVEL
+    value: "DEBUG"
