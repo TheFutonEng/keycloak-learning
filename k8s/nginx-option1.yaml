@@ -20,8 +20,8 @@ data:
         default_type application/octet-stream;
 
         log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
-                         '$status $body_bytes_sent "$http_referer" '
-                         '"$http_user_agent" "$http_x_forwarded_for"';
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for"';
 
         access_log /dev/stdout main;
 
@@ -75,30 +75,22 @@ data:
                 }
             }
 
-            # Protected endpoint
             location /secure {
                 access_by_lua_block {
                     local oidc = require("resty.openidc")
-
                     local opts = {
-                        redirect_uri = "http://nginx.wsp.local/_oauth",  -- Updated to use ingress hostname
-                        discovery = "http://keycloak.wsp.local/realms/test/.well-known/openid-configuration",  -- Updated to use ingress hostname
+                        redirect_uri = "http://nginx.wsp.local/_oauth",
+                        discovery = "http://keycloak.wsp.local/realms/test/.well-known/openid-configuration",
                         client_id = "nginx-test",
                         client_secret = "nginx-test-secret",
                         ssl_verify = "no",
-                        debug = true,
-                        log_level = "debug",
                         session = {
-                          storage = "cookie",
-                          compressor = nil,
-                          rolling = true,
-                          lifetime = 3600
-                      }
+                            storage = "cookie",
+                            compressor = nil,
+                            rolling = true,
+                            lifetime = 3600
+                        }
                     }
-
-                    local session = require("resty.session")
-                    ngx.log(ngx.DEBUG, "Session module loaded: ", tostring(session ~= nil))
-                    ngx.log(ngx.DEBUG, "Session configuration: ", require("cjson").encode(session.configuration or {}))
 
                     local res, err = oidc.authenticate(opts)
                     if err then
@@ -120,45 +112,34 @@ data:
                 }
             }
 
-            # OAuth callback
             location = /_oauth {
-              access_by_lua_block {
-                  local oidc = require("resty.openidc")
-
-                  -- Use the exact same opts table as in the /secure endpoint
-                  local opts = {
-                      redirect_uri = "http://nginx.wsp.local/_oauth",
-                      discovery = "http://keycloak.wsp.local/realms/test/.well-known/openid-configuration",
-                      client_id = "nginx-test",
-                      client_secret = "nginx-test-secret",
-                      ssl_verify = "no",
-                      debug = true,
-                      log_level = "debug",
-                      session = {
-                        storage = "cookie",
-                        compressor = nil,
-                        rolling = true,
-                        lifetime = 3600
+                access_by_lua_block {
+                    local oidc = require("resty.openidc")
+                    local opts = {
+                        redirect_uri = "http://nginx.wsp.local/_oauth",
+                        discovery = "http://keycloak.wsp.local/realms/test/.well-known/openid-configuration",
+                        client_id = "nginx-test",
+                        client_secret = "nginx-test-secret",
+                        ssl_verify = "no",
+                        session = {
+                            storage = "cookie",
+                            compressor = nil,
+                            rolling = true,
+                            lifetime = 3600
+                        }
                     }
-                  }
 
-                  local session = require("resty.session")
-                  ngx.log(ngx.DEBUG, "Session module loaded: ", tostring(session ~= nil))
-                  ngx.log(ngx.DEBUG, "Session configuration: ", require("cjson").encode(session.configuration or {}))
+                    local res, err = oidc.authenticate(opts)
+                    if err then
+                        ngx.log(ngx.ERR, "Error during callback: " .. err)
+                        ngx.status = 500
+                        ngx.say("Error during callback: " .. err)
+                        return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+                    end
 
-                  local res, err = oidc.authenticate(opts)  -- Change this line
-                  if err then
-                      ngx.log(ngx.ERR, "Error during callback: " .. err)
-                      ngx.status = 500
-                      ngx.say("Error during callback: " .. err)
-                      return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
-                  end
-
-                  -- Redirect back to the original page
-                  return ngx.redirect("/secure")
-              }
-          }
-
+                    return ngx.redirect("/secure")
+                }
+            }
         }
     }
   mime.types: |
