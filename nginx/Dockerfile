@@ -11,11 +11,19 @@ RUN apk add --no-cache \
     pcre-dev \
     openssl-dev \
     zlib-dev \
-    luarocks5.3 \
-    lua5.3-dev
+    lua5.1-dev \
+    luarocks \
+    zlib \
+    zlib-static \
+    linux-headers
 
-# Configure luarocks to use the correct Lua version
-RUN ln -s /usr/bin/luarocks-5.3 /usr/local/bin/luarocks
+RUN ln -sf /usr/bin/luarocks-5.1 /usr/bin/luarocks
+
+# Debug luarocks installation
+RUN which luarocks || echo "luarocks not in PATH" && \
+    ls -la /usr/bin/luarocks || echo "luarocks not in /usr/bin" && \
+    ls -la /sbin/luarocks || echo "luarocks not in /sbin" && \
+    find / -name luarocks 2>/dev/null || echo "luarocks not found anywhere"
 
 # Install lua-resty-openidc and its dependencies
 RUN luarocks install lua-cjson && \
@@ -23,7 +31,8 @@ RUN luarocks install lua-cjson && \
     luarocks install lua-resty-http && \
     luarocks install lua-resty-jwt && \
     luarocks install lua-resty-session && \
-    luarocks install lua-resty-openidc
+    luarocks install lua-resty-openidc && \
+    luarocks install lua-ffi-zlib
 
 # Create necessary directories and set permissions
 RUN mkdir -p /var/run/openresty \
@@ -42,6 +51,13 @@ RUN mkdir -p /var/run/openresty \
     /usr/share/nginx/html \
     /usr/local/openresty/nginx/logs \
     /usr/local/openresty/nginx
+
+RUN mkdir -p /usr/local/openresty/lualib/resty && \
+    ln -sf /usr/local/share/lua/5.1/resty/openidc.lua /usr/local/openresty/lualib/resty/openidc.lua && \
+    ln -sf /usr/local/share/lua/5.1/resty/jwt.lua /usr/local/openresty/lualib/resty/jwt.lua && \
+    ln -sf /usr/local/share/lua/5.1/resty/session.lua /usr/local/openresty/lualib/resty/session.lua
+
+RUN ln -sf /usr/local/share/lua/5.1/resty/* /usr/local/openresty/lualib/resty/
 
 # Create test page
 RUN echo '<html><body><h1>Protected Page</h1><pre id="userinfo">Loading user info...</pre><script>fetch("/debug").then(r=>r.json()).then(data=>document.getElementById("userinfo").textContent=JSON.stringify(data,null,2));</script></body></html>' > /usr/share/nginx/html/index.html

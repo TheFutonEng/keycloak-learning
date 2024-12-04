@@ -17,6 +17,12 @@ postgresql:
   architecture: standalone
 
 extraEnvVars:
+  - name: KC_HOSTNAME_URL
+    value: "http://localhost:8081"  # Match your port-forward
+  - name: KC_HOSTNAME_ADMIN_URL
+    value: "http://localhost:8081"  # Match your port-forward
+  - name: KC_HOSTNAME_STRICT
+    value: "false"
   - name: KC_HTTP_ENABLED
     value: "true"
   - name: KC_HTTPS_ENABLED
@@ -25,6 +31,16 @@ extraEnvVars:
     value: "edge"
   - name: KC_LOG_LEVEL
     value: "INFO"
+  - name: KC_HOSTNAME_STRICT_BACKCHANNEL
+    value: "false"
+  - name: KC_HOSTNAME_STRICT_HTTPS
+    value: "false"
+
+  # Logging for debugging
+  - name: KC_LOG_LEVEL
+    value: "DEBUG,io.quarkus:INFO,org.infinispan:INFO,org.keycloak.services.scheduled:INFO"
+  - name: KC_LOG_CONSOLE_COLOR
+    value: "true"
 
 resources:
   limits:

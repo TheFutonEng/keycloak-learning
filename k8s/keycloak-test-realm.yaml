@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: test-realm
-  namespace: keycloak-test
+  namespace: keycloak
 data:
   realm.json: |
     {
@@ -30,8 +30,12 @@ data:
           "directAccessGrantsEnabled": true,
           "serviceAccountsEnabled": false,
           "authorizationServicesEnabled": false,
-          "redirectUris": ["*"],
-          "webOrigins": ["*"],
+          "redirectUris": [
+            "http://nginx.wsp.local/*"
+          ],
+          "webOrigins": [
+            "http://nginx.wsp.local"
+          ],
           "clientAuthenticatorType": "client-secret",
           "secret": "nginx-test-secret"
         }

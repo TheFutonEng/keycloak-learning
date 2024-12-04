@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: nginx-test-config
-  namespace: nginx-test
+  namespace: nginx
 data:
   nginx.conf: |
     daemon off;
@@ -37,6 +37,17 @@ data:
         lua_shared_dict discovery 1m;
         lua_shared_dict jwks 1m;
         lua_shared_dict sessions 10m;
+        lua_shared_dict session_store 1m;
+
+        init_by_lua_block {
+            require("resty.session").init({
+                key_prefix = "sessions",
+                storage = "cookie",
+                compressor = nil,
+                encoder = require("cjson").encode,
+                decoder = require("cjson").decode
+            })
+        }
 
         server {
             listen 8080;
@@ -70,37 +81,24 @@ data:
                     local oidc = require("resty.openidc")
 
                     local opts = {
-                        redirect_uri = "http://localhost:8080/_oauth",
-                        discovery = "http://keycloak-test.keycloak-test.svc.cluster.local:8080/realms/test/.well-known/openid-configuration",
+                        redirect_uri = "http://nginx.wsp.local/_oauth",  -- Updated to use ingress hostname
+                        discovery = "http://keycloak.wsp.local/realms/test/.well-known/openid-configuration",  -- Updated to use ingress hostname
                         client_id = "nginx-test",
                         client_secret = "nginx-test-secret",
                         ssl_verify = "no",
-
-                        override_discovery_endpoints = true,
-                        authorization_endpoint = "http://localhost:8081/realms/test/protocol/openid-connect/auth",
-                        token_endpoint = "http://keycloak-test.keycloak-test.svc.cluster.local:8080/realms/test/protocol/openid-connect/token",
-                        jwks_uri = "http://keycloak-test.keycloak-test.svc.cluster.local:8080/realms/test/protocol/openid-connect/certs",
-                        end_session_endpoint = "http://localhost:8081/realms/test/protocol/openid-connect/logout",
-
-                        -- Additional debugging
                         debug = true,
                         log_level = "debug",
-                        accept_none_alg = true,
-                        accept_unsupported_alg = true,
-                        discovery_override_url = "http://localhost:8081/realms/test"
+                        session = {
+                          storage = "cookie",
+                          compressor = nil,
+                          rolling = true,
+                          lifetime = 3600
+                      }
                     }
 
-                    -- Add this function to override the discovery response
-                    local old_openidc_discover = oidc.openidc_discover
-                    oidc.openidc_discover = function(opts)
-                        local discovery, err = old_openidc_discover(opts)
-                        if discovery then
-                            discovery.authorization_endpoint = "http://localhost:8081/realms/test/protocol/openid-connect/auth"
-                        end
-                        return discovery, err
-                    end
-
-                    ngx.log(ngx.DEBUG, "Starting OIDC authentication")
+                    local session = require("resty.session")
+                    ngx.log(ngx.DEBUG, "Session module loaded: ", tostring(session ~= nil))
+                    ngx.log(ngx.DEBUG, "Session configuration: ", require("cjson").encode(session.configuration or {}))
 
                     local res, err = oidc.authenticate(opts)
                     if err then
@@ -124,34 +122,42 @@ data:
 
             # OAuth callback
             location = /_oauth {
-                access_by_lua_block {
-                    local oidc = require("resty.openidc")
+              access_by_lua_block {
+                  local oidc = require("resty.openidc")
 
-                    local opts = {
-                        redirect_uri = "http://localhost:8080/_oauth",
-                        discovery = "http://keycloak-test.keycloak-test.svc.cluster.local:8080/realms/test/.well-known/openid-configuration",
-                        client_id = "nginx-test",
-                        client_secret = "nginx-test-secret",
-                        ssl_verify = "no",
-
-                        override_discovery_endpoints = true,
-                        authorization_endpoint = "http://localhost:8081/realms/test/protocol/openid-connect/auth",
-                        token_endpoint = "http://keycloak-test.keycloak-test.svc.cluster.local:8080/realms/test/protocol/openid-connect/token",
-                        jwks_uri = "http://keycloak-test.keycloak-test.svc.cluster.local:8080/realms/test/protocol/openid-connect/certs",
-                        end_session_endpoint = "http://localhost:8081/realms/test/protocol/openid-connect/logout"
+                  -- Use the exact same opts table as in the /secure endpoint
+                  local opts = {
+                      redirect_uri = "http://nginx.wsp.local/_oauth",
+                      discovery = "http://keycloak.wsp.local/realms/test/.well-known/openid-configuration",
+                      client_id = "nginx-test",
+                      client_secret = "nginx-test-secret",
+                      ssl_verify = "no",
+                      debug = true,
+                      log_level = "debug",
+                      session = {
+                        storage = "cookie",
+                        compressor = nil,
+                        rolling = true,
+                        lifetime = 3600
                     }
+                  }
 
-                    ngx.log(ngx.DEBUG, "Handling OAuth callback")
+                  local session = require("resty.session")
+                  ngx.log(ngx.DEBUG, "Session module loaded: ", tostring(session ~= nil))
+                  ngx.log(ngx.DEBUG, "Session configuration: ", require("cjson").encode(session.configuration or {}))
 
-                    local err = oidc.handle_callback(opts)
-                    if err then
-                        ngx.log(ngx.ERR, "Error during callback: " .. err)
-                        ngx.status = 500
-                        ngx.say("Error during callback: " .. err)
-                        return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
-                    end
-                }
-            }
+                  local res, err = oidc.authenticate(opts)  -- Change this line
+                  if err then
+                      ngx.log(ngx.ERR, "Error during callback: " .. err)
+                      ngx.status = 500
+                      ngx.say("Error during callback: " .. err)
+                      return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+                  end
+
+                  -- Redirect back to the original page
+                  return ngx.redirect("/secure")
+              }
+          }
 
         }
     }
@@ -179,7 +185,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nginx-test
-  namespace: nginx-test
+  namespace: nginx
 spec:
   replicas: 1
   selector:
@@ -226,7 +232,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nginx-test
-  namespace: nginx-test
+  namespace: nginx
 spec:
   type: ClusterIP
   ports:
@@ -234,3 +240,25 @@ spec:
     targetPort: 8080
   selector:
     app: nginx-test
+---
+# k8s/nginx-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-test
+  namespace: nginx
+  annotations:
+    haproxy.org/ssl-redirect: "false"  # Ensure no SSL redirect
+spec:
+  ingressClassName: haproxy
+  rules:
+  - host: nginx.wsp.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nginx-test
+            port:
+              number: 80

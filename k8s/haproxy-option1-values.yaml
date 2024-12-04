@@ -1,0 +1,12 @@
+# k8s/haproxy-values.yaml
+controller:
+  kind: DaemonSet
+  service:
+    type: LoadBalancer
+  config:
+    ssl-redirect: "false"  # Explicitly disable SSL redirect
+    forwardfor: enabled
+    headers: "http-server-close"
+    balance: "roundrobin"
+defaultBackend:
+  enabled: true
